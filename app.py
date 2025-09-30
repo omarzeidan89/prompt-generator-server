@@ -1,16 +1,18 @@
 # app.py
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 import openai
 
-# --- حل مشكلة proxies ---
+# --- حل مشكلة proxies في Render Free Plan ---
 os.environ["HTTP_PROXY"] = ""
 os.environ["HTTPS_PROXY"] = ""
-# -------------------------
+# ----------------------------------------------
 
 app = Flask(__name__)
+CORS(app)  # تمكين CORS للسماح بالاتصال من تطبيقات خارجية
 
-# احصل على مفتاح OpenAI من متغير البيئة
+# احصل على مفتاح OpenAI من متغير البيئة (آمن)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route('/generate-prompt', methods=['POST'])
@@ -50,12 +52,12 @@ def generate_prompt():
     except Exception as e:
         return jsonify({"prompt": "عذراً، حدث خطأ. حاول لاحقاً."}), 500
 
-# نقطة تحقق بسيطة
+# نقطة تحقق بسيطة للتأكد أن السيرفر يعمل
 @app.route('/health', methods=['GET'])
 def health():
     return "السيرفر يعمل! ✅"
 
-# --- هذا السطر ضروري لتشغيل السيرفر على Render ---
+# --- تشغيل السيرفر على المنفذ الصحيح في Render ---
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
