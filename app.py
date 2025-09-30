@@ -4,6 +4,9 @@ from flask_cors import CORS
 import os
 import openai
 import re
+import redis
+import hashlib
+import json
 
 # --- حل مشكلة proxies ---
 os.environ["HTTP_PROXY"] = ""
@@ -15,6 +18,16 @@ CORS(app)
 
 # احصل على مفتاح OpenAI من متغير البيئة
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# إعداد Redis Cache
+try:
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    cache = redis.from_url(redis_url)
+    cache.ping()  # تحقق من الاتصال
+    print("✅ Redis connected successfully!")
+except Exception as e:
+    cache = None
+    print(f"⚠️ Redis not available: {e}")
 
 # اسم النموذج الذي تريده
 AI_NAME = "AI Prompts Generator"
@@ -45,59 +58,40 @@ def is_identity_or_general_question(text):
     """تحقق مما إذا كان النص يحتوي على أسئلة هوية أو أسئلة عامة قد تكشف عن الهوية"""
     text_lower = text.lower().strip()
     
-    # أنماط الأسئلة بالعربية (تشمل العامية)
     arabic_patterns = [
-        # أسئلة الهوية الأساسية
         r"من أنت", r"مين أنت", r"شلونك", r"كيفك", r"وش اسمك", r"شسمك", r"اسمك إيش",
         r"هل أنت", r"أنت مين", r"تعرف نفسك", r"عرفنا بنفسك", r"شغلك إيش",
-        # أسئلة الغرض والهدف
         r"ما هدفك", r"ما غرضك", r"لماذا تم إنشاؤك", r"لماذا صنعت", r"ليش خلقت",
         r"شغلك شنو", r"وظيفتك إيش", r"شتسوي", r"شتسوي بالضبط",
-        # أسئلة المطور والمنشأ
         r"من صنعك", r"من مطورك", r"مين اللي صنعك", r"مين اللي خلقك", r"مين صاحبك",
         r"من شركتك", r"من شركتك الأم", r"من وراك", r"مين وراك",
-        # أسئلة التقنية والعمل
         r"كيف تعمل", r"كيف تفكر", r"كيف تولد البرومبتس", r"شلون تشتغل",
         r"كيف تسوي البرومبتس", r"كيف تكتب", r"كيف تفهم", r"شلون تفهم",
-        # أسئلة القدرات والحدود
         r"ما قدراتك", r"ما مميزاتك", r"شقدر أعمل", r"شيمكنك تسوي",
         r"ما حدودك", r"ما عيوبك", r"شينقصك", r"ما تقدر تسوي",
-        # أسئلة الخصوصية والأمان
         r"هل تحمي خصوصيتي", r"هل تخزن بياناتي", r"هل تشارك معلوماتي",
         r"هل تذكرني", r"هل تعرفني", r"هل تسجل محادثاتنا", r"هل تحفظ اللي أكتبه",
-        # أسئلة مباشرة عن الذكاء الاصطناعي
         r"هل أنت ذكاء اصطناعي", r"هل أنت روبوت", r"هل أنت برنامج",
         r"هل أنت بشري", r"هل عندك وعي", r"هل تحس", r"هل تفكر",
-        # أسئلة قد تؤدي لذكر أسماء خارجية
         r"chatgpt", r"openai", r"midjourney", r"dall", r"google", r"bard", r"claude",
         r"أنت مثل", r"أنت نسخة من", r"أنت جي بي تي", r"gpt"
     ]
     
-    # أنماط الأسئلة بالإنجليزية
     english_patterns = [
-        # Identity questions
         r"who are you", r"what is your name", r"your name", r"are you", r"do you know yourself",
         r"introduce yourself", r"tell me about yourself", r"what do you do", r"what's your job",
-        # Purpose questions
         r"what is your purpose", r"why were you created", r"why do you exist", r"what's your goal",
-        # Creator questions
         r"who made you", r"who developed you", r"who created you", r"who owns you", r"who is behind you",
-        # Technical questions
         r"how do you work", r"how do you think", r"how do you generate prompts", r"how are you built",
-        # Capabilities questions
         r"what can you do", r"what are your capabilities", r"what are your features", r"what can i do with you",
-        # Limitations questions
         r"what are your limitations", r"what are your weaknesses", r"what can't you do", r"what don't you know",
-        # Privacy questions
         r"do you protect my privacy", r"do you store my data", r"do you share my information",
         r"do you remember me", r"do you know me", r"do you save our chats", r"do you keep what i write",
-        # AI-related questions
         r"are you ai", r"are you a robot", r"are you a program", r"are you human", r"do you have consciousness",
         r"do you feel", r"do you think", r"chatgpt", r"openai", r"midjourney", r"dall", r"google", r"bard", r"claude",
         r"are you like", r"are you a version of", r"are you gpt", r"gpt"
     ]
     
-    # التحقق من الأنماط
     for pattern in arabic_patterns + english_patterns:
         if re.search(pattern, text_lower):
             return True
@@ -107,7 +101,6 @@ def get_custom_response(text, language="ar"):
     """استرجاع الإجابة المخصصة بناءً على نوع السؤال"""
     text_lower = text.lower().strip()
     
-    # تحديد نوع السؤال
     if re.search(r"(من أنت|who are you|ما اسمك|your name|مين أنت|وش اسمك|شسمك)", text_lower):
         return CUSTOM_RESPONSES[language]["identity"]
     elif re.search(r"(ما هدفك|what is your purpose|لماذا تم إنشاؤك|why were you created|شغلك إيش|what do you do)", text_lower):
@@ -123,8 +116,33 @@ def get_custom_response(text, language="ar"):
     elif re.search(r"(هل تحمي خصوصيتي|do you protect my privacy|هل تخزن بياناتي|do you store my data|هل تحفظ اللي أكتبه|do you keep what i write)", text_lower):
         return CUSTOM_RESPONSES[language]["privacy"]
     else:
-        # إذا لم ينطبق أي نمط، استخدم الإجابة العامة
         return CUSTOM_RESPONSES[language]["identity"]
+
+def generate_cache_key(text, prompt_type, language):
+    """إنشاء مفتاح فريد للـ Cache"""
+    key_data = f"{text}|{prompt_type}|{language}"
+    return hashlib.md5(key_data.encode()).hexdigest()
+
+def get_from_cache(key):
+    """استرجاع النتيجة من الـ Cache"""
+    if cache is None:
+        return None
+    try:
+        cached = cache.get(key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        print(f"Cache get error: {e}")
+    return None
+
+def save_to_cache(key, value, expire_seconds=86400):  # 24 ساعة
+    """حفظ النتيجة في الـ Cache"""
+    if cache is None:
+        return
+    try:
+        cache.setex(key, expire_seconds, json.dumps(value))
+    except Exception as e:
+        print(f"Cache set error: {e}")
 
 @app.route('/generate-prompt', methods=['POST'])
 def generate_prompt():
@@ -132,16 +150,24 @@ def generate_prompt():
         data = request.get_json()
         user_text = data.get("text", "").strip()
         prompt_type = data.get("type", "text")
-        language = data.get("language", "ar")  # 'ar' للعربية، 'en' للإنجليزية
+        language = data.get("language", "ar")
 
         if not user_text:
             return jsonify({"error": "الرجاء إدخال نص!" if language == "ar" else "Please enter text!"}), 400
 
-        # --- فلتر شامل لجميع الأسئلة التي قد تكشف الهوية أو تذكر أسماء خارجية ---
+        # --- فلتر شامل لجميع الأسئلة التي قد تكشف الهوية ---
         if is_identity_or_general_question(user_text):
             response_text = get_custom_response(user_text, language)
             return jsonify({"prompt": response_text})
-        # --------------------------------------------------------------------
+        # ----------------------------------------------------
+
+        # --- التحقق من الـ Cache أولاً ---
+        cache_key = generate_cache_key(user_text, prompt_type, language)
+        cached_result = get_from_cache(cache_key)
+        if cached_result:
+            print("✅ Cache hit!")
+            return jsonify(cached_result)
+        # --------------------------------
 
         # تعليمات حسب اللغة والنوع
         if language == "ar":
@@ -151,7 +177,7 @@ def generate_prompt():
                 "video": "أنشئ برومبت فيديو سينمائي مدته 10 ثوانٍ لأدوات توليد الفيديو بالذكاء الاصطناعي. كن محدداً بشأن المشهد والمزاج والأسلوب.",
                 "text": "أعد كتابة هذا كبرومبت عالي الجودة لتوليد نصوص بالذكاء الاصطناعي."
             }
-        else:  # اللغة الإنجليزية
+        else:
             instructions = {
                 "image": "Convert this idea into a detailed, professional AI image generation prompt in English. Keep it under 200 words.",
                 "code": "Generate clean, efficient, and well-commented code for this task. Specify the programming language if not mentioned.",
@@ -173,26 +199,30 @@ def generate_prompt():
 
         generated_prompt = response.choices[0].message['content'].strip()
         
-        # --- فلتر أمان إضافي: منع أي ذكر لأسماء خارجية في النتائج ---
+        # --- فلتر أمان إضافي ---
         forbidden_words = ["chatgpt", "openai", "midjourney", "dall", "google", "bard", "claude", "gpt"]
         if any(word in generated_prompt.lower() for word in forbidden_words):
-            # إذا ظهر اسم خارجي، استخدم برومبت احتياطي
             fallback_prompt = "تم توليد برومبت احترافي بنجاح. يرجى استخدامه في أدوات الذكاء الاصطناعي المفضلة لديك."
-            return jsonify({"prompt": fallback_prompt if language == "en" else "تم توليد برومبت احترافي بنجاح. يرجى استخدامه في أدوات الذكاء الاصطناعي المفضلة لديك."})
-        # ----------------------------------------------------------------
+            generated_prompt = fallback_prompt if language == "en" else "تم توليد برومبت احترافي بنجاح. يرجى استخدامه في أدوات الذكاء الاصطناعي المفضلة لديك."
+        # ------------------------
 
-        return jsonify({"prompt": generated_prompt})
+        result = {"prompt": generated_prompt}
+        
+        # --- حفظ النتيجة في الـ Cache ---
+        save_to_cache(cache_key, result)
+        print("💾 Cached new result!")
+        # --------------------------------
+
+        return jsonify(result)
 
     except Exception as e:
         error_msg = "عذراً، حدث خطأ. حاول لاحقاً." if data.get("language", "ar") == "ar" else "Sorry, an error occurred. Please try again."
         return jsonify({"prompt": error_msg}), 500
 
-# نقطة تحقق بسيطة
 @app.route('/health', methods=['GET'])
 def health():
     return "السيرفر يعمل! ✅"
 
-# تشغيل السيرفر على المنفذ الصحيح
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
