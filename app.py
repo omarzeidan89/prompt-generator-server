@@ -2,29 +2,23 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from openai import OpenAI
-import logging
+import openai
 
 # --- حل مشكلة proxies ---
 os.environ["HTTP_PROXY"] = ""
 os.environ["HTTPS_PROXY"] = ""
 # -------------------------
 
-# إعداد التسجيل (Logging)
-logging.basicConfig(level=logging.DEBUG)
-
 app = Flask(__name__)
 CORS(app)
 
 # احصل على مفتاح OpenAI من متغير البيئة
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route('/generate-prompt', methods=['POST'])
 def generate_prompt():
     try:
         data = request.get_json()
-        app.logger.debug(f"Request received: {data}")
-
         user_text = data.get("text", "").strip()
         prompt_type = data.get("type", "text")
 
@@ -41,9 +35,9 @@ def generate_prompt():
 
         system_message = instructions.get(prompt_type, instructions["text"])
 
-        # استخدام GPT-4o-mini (الأفضل)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        # استخدام النموذج القديم (gpt-3.5-turbo)
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_text}
@@ -52,11 +46,10 @@ def generate_prompt():
             temperature=0.7
         )
 
-        generated_prompt = response.choices[0].message.content.strip()
+        generated_prompt = response.choices[0].message['content'].strip()
         return jsonify({"prompt": generated_prompt})
 
     except Exception as e:
-        app.logger.error(f"Error occurred: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # نقطة تحقق بسيطة
