@@ -3,11 +3,15 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import openai
+import logging
 
 # --- حل مشكلة proxies ---
 os.environ["HTTP_PROXY"] = ""
 os.environ["HTTPS_PROXY"] = ""
 # -------------------------
+
+# إعداد التسجيل (Logging)
+logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 CORS(app)
@@ -19,6 +23,8 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 def generate_prompt():
     try:
         data = request.get_json()
+        app.logger.debug(f"Request received: {data}")  # ← تسجيل البيانات الواردة
+
         user_text = data.get("text", "").strip()
         prompt_type = data.get("type", "text")
 
@@ -50,7 +56,8 @@ def generate_prompt():
         return jsonify({"prompt": generated_prompt})
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500  # ← هذا هو التعديل!
+        app.logger.error(f"Error occurred: {str(e)}")  # ← تسجيل الخطأ
+        return jsonify({"error": str(e)}), 500
 
 # نقطة تحقق بسيطة
 @app.route('/health', methods=['GET'])
