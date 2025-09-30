@@ -1,7 +1,12 @@
 # app.py
 from flask import Flask, request, jsonify
-from openai import OpenAI
 import os
+from openai import OpenAI
+
+# --- حل مشكلة proxies في Render Free Plan ---
+os.environ["HTTP_PROXY"] = ""
+os.environ["HTTPS_PROXY"] = ""
+# ----------------------------------------------
 
 app = Flask(__name__)
 
@@ -44,7 +49,7 @@ def generate_prompt():
     except Exception as e:
         return jsonify({"prompt": "عذراً، حدث خطأ. حاول لاحقاً."}), 500
 
-# نقطة تحقق بسيطة
+# نقطة تحقق بسيطة للتأكد أن السيرفر يعمل
 @app.route('/health', methods=['GET'])
 def health():
     return "السيرفر يعمل! ✅"
