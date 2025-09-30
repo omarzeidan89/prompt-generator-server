@@ -6,7 +6,8 @@ import openai
 import re
 import redis
 import hashlib
-import json
+import time
+from collections import defaultdict
 
 # --- حل مشكلة proxies ---
 os.environ["HTTP_PROXY"] = ""
@@ -28,6 +29,10 @@ try:
 except Exception as e:
     cache = None
     print(f"⚠️ Redis not available: {e}")
+
+# إعدادات الـ Cache الذكي
+MAX_CACHE_SIZE = 1000  # الحد الأقصى لعدد العناصر في الذاكرة
+CACHE_STATS = defaultdict(int)  # تتبع عدد مرات طلب كل برومبت
 
 # اسم النموذج الذي تريده
 AI_NAME = "AI Prompts Generator"
@@ -118,29 +123,50 @@ def get_custom_response(text, language="ar"):
     else:
         return CUSTOM_RESPONSES[language]["identity"]
 
+def calculate_smart_expiry(prompt_text, request_count=1):
+    """حساب مدة التخزين الذكية بناءً على التعقيد والتكرار"""
+    prompt_length = len(prompt_text)
+    length_factor = min(prompt_length / 100, 3)
+    repeat_factor = min(request_count / 5, 4)
+    base_time = 86400  # 24 ساعة
+    smart_expiry = int(base_time * length_factor * repeat_factor)
+    return min(smart_expiry, 2592000)  # لا تتجاوز 30 يوماً
+
 def generate_cache_key(text, prompt_type, language):
     """إنشاء مفتاح فريد للـ Cache"""
     key_data = f"{text}|{prompt_type}|{language}"
     return hashlib.md5(key_data.encode()).hexdigest()
 
 def get_from_cache(key):
-    """استرجاع النتيجة من الـ Cache"""
+    """استرجاع من الـ Cache مع تتبع الإحصائيات"""
     if cache is None:
         return None
     try:
-        cached = cache.get(key)
-        if cached:
-            return json.loads(cached)
+        CACHE_STATS[key] += 1
+        cached_data = cache.hgetall(f"prompt:{key}")
+        if cached_data and b'prompt' in cached_data:
+            prompt_text = cached_data[b'prompt'].decode('utf-8')
+            return {"prompt": prompt_text}
     except Exception as e:
         print(f"Cache get error: {e}")
     return None
 
-def save_to_cache(key, value, expire_seconds=86400):  # 24 ساعة
-    """حفظ النتيجة في الـ Cache"""
+def save_to_cache(key, value, prompt_text):
+    """حفظ في الـ Cache مع إدارة ذكية للذاكرة"""
     if cache is None:
         return
     try:
-        cache.setex(key, expire_seconds, json.dumps(value))
+        request_count = CACHE_STATS.get(key, 1)
+        expiry = calculate_smart_expiry(prompt_text, request_count)
+        cache.hset(f"prompt:{key}", mapping={
+            'prompt': prompt_text,
+            'timestamp': str(time.time()),
+            'requests': str(request_count)
+        })
+        cache.expire(f"prompt:{key}", expiry)
+        current_size = cache.dbsize()
+        if current_size > MAX_CACHE_SIZE:
+            print(f"⚠️ Cache size ({current_size}) exceeds limit.")
     except Exception as e:
         print(f"Cache set error: {e}")
 
@@ -208,11 +234,11 @@ def generate_prompt():
 
         result = {"prompt": generated_prompt}
         
-        # --- حفظ النتيجة في الـ Cache ---
-        save_to_cache(cache_key, result)
-        print("💾 Cached new result!")
-        # --------------------------------
-
+        # --- حفظ ذكي في الـ Cache ---
+        save_to_cache(cache_key, result, generated_prompt)
+        print(f"💾 Smart cached! Key: {cache_key[:8]}...")
+        # -----------------------------
+        
         return jsonify(result)
 
     except Exception as e:
