@@ -1,17 +1,17 @@
 # app.py
 from flask import Flask, request, jsonify
 import os
-from openai import OpenAI
+import openai
 
-# --- حل مشكلة proxies في Render Free Plan ---
+# --- حل مشكلة proxies ---
 os.environ["HTTP_PROXY"] = ""
 os.environ["HTTPS_PROXY"] = ""
-# ----------------------------------------------
+# -------------------------
 
 app = Flask(__name__)
 
-# احصل على مفتاح OpenAI من متغير البيئة (آمن)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# احصل على مفتاح OpenAI من متغير البيئة
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route('/generate-prompt', methods=['POST'])
 def generate_prompt():
@@ -33,8 +33,9 @@ def generate_prompt():
 
         system_message = instructions.get(prompt_type, instructions["text"])
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        # استخدام النموذج القديم (gpt-3.5-turbo)
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_text}
@@ -43,13 +44,13 @@ def generate_prompt():
             temperature=0.7
         )
 
-        generated_prompt = response.choices[0].message.content.strip()
+        generated_prompt = response.choices[0].message['content'].strip()
         return jsonify({"prompt": generated_prompt})
 
     except Exception as e:
         return jsonify({"prompt": "عذراً، حدث خطأ. حاول لاحقاً."}), 500
 
-# نقطة تحقق بسيطة للتأكد أن السيرفر يعمل
+# نقطة تحقق بسيطة
 @app.route('/health', methods=['GET'])
 def health():
     return "السيرفر يعمل! ✅"
