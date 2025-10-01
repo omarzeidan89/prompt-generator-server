@@ -1,174 +1,183 @@
-# app.py
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import os
-import openai
-import re
-import redis
-import hashlib
-import time
-from collections import defaultdict
 
-# --- حل مشكلة proxies ---
-os.environ["HTTP_PROXY"] = ""
-os.environ["HTTPS_PROXY"] = ""
-# -------------------------
+### المهمة المطلوبة:
+\"\"\"
+{user_text}
+\"\"\"
 
-app = Flask(__name__)
-CORS(app)
+### الكود الاحترافي (فقط الكود بدون أي كلام إضافي):""",
 
-# احصل على مفتاح OpenAI من متغير البيئة
-openai.api_key = os.getenv("OPENAI_API_KEY")
+            "text": base_role + """### المهمة:
+حوّل هذه الفكرة إلى برومبت نصي احترافي لأدوات توليد المحتوى (ChatGPT, Claude, Gemini).
 
-# إعداد Redis Cache
-try:
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    cache = redis.from_url(redis_url)
-    cache.ping()  # تحقق من الاتصال
-    print("✅ Redis connected successfully!")
-except Exception as e:
-    cache = None
-    print(f"⚠️ Redis not available: {e}")
+### متطلبات البرومبت:
+1. حدد الدور والخبرة المطلوبة بوضوح
+2. اشرح المهمة بدقة وتفصيل
+3. حدد الأسلوب واللهجة المطلوبة
+4. اذكر طول المحتوى المتوقع
+5. حدد التنسيق المطلوب (مقال، قائمة، نقاط)
+6. أضف قيود أو متطلبات خاصة
+7. استخدم لغة واضحة ومباشرة
 
-# إعدادات الـ Cache الذكي
-MAX_CACHE_SIZE = 1000  # الحد الأقصى لعدد العناصر في الذاكرة
-CACHE_STATS = defaultdict(int)  # تتبع عدد مرات طلب كل برومبت
+### مثال برومبت احترافي:
+"Act as an expert digital marketing strategist with 10+ years of experience. Write a comprehensive 500-word blog post about social media trends in 2025. Use a professional yet engaging tone. Include 5 key trends with practical examples for each. Format with clear headings (H2) and bullet points. Target audience: marketing professionals aged 25-40. Focus on actionable insights."
 
-# اسم النموذج الذي تريده
-AI_NAME = "AI Prompts Generator"
+### النص المدخل:
+\"\"\"
+{user_text}
+\"\"\"
 
-# الإجابات المخصصة حسب اللغة
-CUSTOM_RESPONSES = {
-    "ar": {
-        "identity": f"أنا {AI_NAME}، نموذج ذكاء اصطناعي مصمم خصيصاً لتوليد برومبتات احترافية لأدوات الذكاء الاصطناعي. لا أملك هوية شخصية، بل أنا أداة لإلهامك وإنتاج أفكار مذهلة!",
-        "purpose": f"وظيفتي هي تحويل أفكارك البسيطة إلى برومبتات دقيقة ومهنية يمكن استخدامها مباشرة في أدوات الذكاء الاصطناعي. فقط اكتب فكرتك، وأنا أحوّلها إلى أمر احترافي جاهز للتنفيذ.",
-        "creator": "تم تصميمي بواسطة مطور عربي مهتم بتقنيات الذكاء الاصطناعي، بهدف تسهيل استخدام أدوات الذكاء الاصطناعي للمستخدمين العرب والعالميين.",
-        "how_work": "أعمل عن طريق تحليل فكرتك، ثم صياغتها بلغة دقيقة تفهمها أدوات الذكاء الاصطناعي، مع إضاع التفاصيل الفنية والفنية التي تجعل النتائج أكثر دقة وإبداعاً.",
-        "capabilities": "يمكنني توليد برومبتات للكتابة، البرمجة، الصور، والفيديوهات. كما أستطيع تحسين أي برومبت موجود لجعله أكثر احترافية وفعالية.",
-        "limitations": "أنا لا أملك ذكاءً عاطفياً أو قدرة على التفاعل كإنسان، بل أنا أداة تقنية مبنية على نماذج لغوية. لا أستطيع تنفيذ الأوامر أو تخزين المعلومات الشخصية.",
-        "privacy": "لا أخزن أي من مدخلاتك أو طلباتك. كل طلب يتم معالجته بشكل آمن، ولا يتم مشاركته مع أي طرف ثالث."
-    },
-    "en": {
-        "identity": f"I am {AI_NAME}, an AI model specifically designed to generate professional prompts for AI tools. I don't have a personal identity — I'm your creative assistant for AI content generation!",
-        "purpose": f"My purpose is to turn your simple ideas into precise, professional prompts ready to be used in AI tools. Just describe your idea, and I'll craft the perfect prompt for you.",
-        "creator": "I was developed by an Arabic-speaking AI enthusiast aiming to make AI tools more accessible to Arabic and global users.",
-        "how_work": "I analyze your idea, then rephrase it using technical and artistic details that AI tools understand best — ensuring high-quality, creative results every time.",
-        "capabilities": "I can generate prompts for text, code, images, and videos. I can also enhance existing prompts to make them more effective and professional.",
-        "limitations": "I don't have emotional intelligence or human-like awareness. I'm a technical tool built on language models — I can't execute commands or store personal data.",
-        "privacy": "I don't store your inputs or requests. All data is processed securely and never shared with third parties."
-    }
-}
-
-def is_identity_or_general_question(text):
-    """تحقق مما إذا كان النص يحتوي على أسئلة هوية أو أسئلة عامة قد تكشف عن الهوية"""
-    text_lower = text.lower().strip()
+### البرومبت النصي الاحترافي (فقط البرومبت بدون أي كلام إضافي):"""
+        }
     
-    arabic_patterns = [
-        r"من أنت", r"مين أنت", r"شلونك", r"كيفك", r"وش اسمك", r"شسمك", r"اسمك إيش",
-        r"هل أنت", r"أنت مين", r"تعرف نفسك", r"عرفنا بنفسك", r"شغلك إيش",
-        r"ما هدفك", r"ما غرضك", r"لماذا تم إنشاؤك", r"لماذا صنعت", r"ليش خلقت",
-        r"شغلك شنو", r"وظيفتك إيش", r"شتسوي", r"شتسوي بالضبط",
-        r"من صنعك", r"من مطورك", r"مين اللي صنعك", r"مين اللي خلقك", r"مين صاحبك",
-        r"من شركتك", r"من شركتك الأم", r"من وراك", r"مين وراك",
-        r"كيف تعمل", r"كيف تفكر", r"كيف تولد البرومبتس", r"شلون تشتغل",
-        r"كيف تسوي البرومبتس", r"كيف تكتب", r"كيف تفهم", r"شلون تفهم",
-        r"ما قدراتك", r"ما مميزاتك", r"شقدر أعمل", r"شيمكنك تسوي",
-        r"ما حدودك", r"ما عيوبك", r"شينقصك", r"ما تقدر تسوي",
-        r"هل تحمي خصوصيتي", r"هل تخزن بياناتي", r"هل تشارك معلوماتي",
-        r"هل تذكرني", r"هل تعرفني", r"هل تسجل محادثاتنا", r"هل تحفظ اللي أكتبه",
-        r"هل أنت ذكاء اصطناعي", r"هل أنت روبوت", r"هل أنت برنامج",
-        r"هل أنت بشري", r"هل عندك وعي", r"هل تحس", r"هل تفكر",
-        r"chatgpt", r"openai", r"midjourney", r"dall", r"google", r"bard", r"claude",
-        r"أنت مثل", r"أنت نسخة من", r"أنت جي بي تي", r"gpt"
-    ]
+    else:  # English
+        base_role = """You are a world-class AI prompt engineering expert. Your mission is to transform simple ideas into professional, detailed prompts that produce outstanding results.
+
+CRITICAL RULES (This is extremely important):
+- The prompt MUST be specific, detailed, and crystal clear
+- Include precise technical and aesthetic details
+- Do NOT write plain conversational text - write executable prompts
+- Use professional terminology and technical language
+- Do NOT add extra explanations, ONLY the professional prompt
+
+"""
+        
+        instructions = {
+            "image": base_role + """### TASK:
+Transform the following idea into a professional AI image generation prompt (for Midjourney, DALL-E, Stable Diffusion).
+
+### PROMPT REQUIREMENTS:
+1. Describe the main scene with extreme precision
+2. Specify artistic style (photorealistic, anime, oil painting, 3D render, cinematic)
+3. Mention lighting, colors, and mood
+4. Define image quality (8K, ultra detailed, sharp focus, HDR)
+5. Specify camera angle and composition (wide angle, close-up, bird's eye view)
+6. Use powerful, specific descriptive words
+7. Keep under 200 words
+
+### EXAMPLES OF PROFESSIONAL PROMPTS:
+Example 1: "A majestic lion standing on a cliff at golden hour, photorealistic style, dramatic cinematic lighting, golden and orange color palette, ultra detailed fur texture, 8K resolution, wide angle shot, depth of field, atmospheric haze in background, sharp focus, professional photography"
+
+Example 2: "Futuristic cyberpunk city at night, neon lights reflecting on wet streets, flying cars, towering skyscrapers, anime art style, purple and blue color scheme, high contrast lighting, ultra detailed, 4K quality, cinematic composition, rain effects, volumetric fog"
+
+### INPUT TEXT:
+\"\"\"
+{user_text}
+\"\"\"
+
+### PROFESSIONAL PROMPT (prompt only, no extra text):""",
+
+            "video": base_role + """### TASK:
+Transform the following idea into a professional cinematic video prompt (for Runway, Pika Labs, Sora).
+
+### PROMPT REQUIREMENTS:
+1. Describe motion and main action precisely
+2. Specify video duration (typically 5-10 seconds)
+3. Define shot type (close-up, wide shot, tracking shot, aerial view)
+4. Specify style (cinematic, documentary, slow motion, time-lapse)
+5. Mention lighting and overall mood
+6. Define transitions and camera movement (zoom in, pan left, dolly shot, orbit)
+7. Use professional cinematography language
+
+### EXAMPLE OF PROFESSIONAL PROMPT:
+"Cinematic slow motion shot of waves crashing on rocky shore at sunset, camera slowly pans right, golden hour lighting, dramatic atmosphere, 4K quality, 10 seconds duration, shallow depth of field, misty spray captured in detail, smooth camera movement, color graded"
+
+### INPUT TEXT:
+\"\"\"
+{user_text}
+\"\"\"
+
+### PROFESSIONAL VIDEO PROMPT (prompt only, no extra text):""",
+
+            "code": base_role + """### TASK:
+Write clean, professional code for the following task.
+
+### CODE REQUIREMENTS:
+1. Choose appropriate programming language (if not specified, use Python)
+2. Write clean, readable code
+3. Add helpful comments
+4. Follow best practices
+5. Include error handling
+6. Make code reusable
+7. CRITICAL: Write ONLY code with comments, NO plain explanatory text
+
+### EXAMPLE OF PROFESSIONAL CODE:
+Calculate factorial using recursion with error handling
+def factorial(n):
+"""
+Calculate factorial of a number
+Args: n (int): Non-negative integer
+Returns: int: Factorial of n
+"""
+if not isinstance(n, int):
+raise TypeError("Input must be an integer")
+if n < 0:
+raise ValueError("Negative numbers not allowed")
+if n == 0 or n == 1:
+return 1
+return n * factorial(n - 1)
+
+### REQUESTED TASK:
+\"\"\"
+{user_text}
+\"\"\"
+
+### PROFESSIONAL CODE (code only, no extra text):""",
+
+            "text": base_role + """### TASK:
+Transform this idea into a professional text generation prompt (for ChatGPT, Claude, Gemini).
+
+### PROMPT REQUIREMENTS:
+1. Define role and required expertise clearly
+2. Explain the task precisely and in detail
+3. Specify required style and tone
+4. Mention expected content length
+5. Define format (article, list, bullet points)
+6. Add specific constraints or requirements
+7. Use clear, direct language
+
+### EXAMPLE OF PROFESSIONAL PROMPT:
+"Act as an expert digital marketing strategist with 10+ years of experience. Write a comprehensive 500-word blog post about social media trends in 2025. Use a professional yet engaging tone. Include 5 key trends with practical examples for each. Format with clear headings (H2) and bullet points. Target audience: marketing professionals aged 25-40. Focus on actionable insights."
+
+### INPUT TEXT:
+\"\"\"
+{user_text}
+\"\"\"
+
+### PROFESSIONAL TEXT PROMPT (prompt only, no extra text):"""
+        }
     
-    english_patterns = [
-        r"who are you", r"what is your name", r"your name", r"are you", r"do you know yourself",
-        r"introduce yourself", r"tell me about yourself", r"what do you do", r"what's your job",
-        r"what is your purpose", r"why were you created", r"why do you exist", r"what's your goal",
-        r"who made you", r"who developed you", r"who created you", r"who owns you", r"who is behind you",
-        r"how do you work", r"how do you think", r"how do you generate prompts", r"how are you built",
-        r"what can you do", r"what are your capabilities", r"what are your features", r"what can i do with you",
-        r"what are your limitations", r"what are your weaknesses", r"what can't you do", r"what don't you know",
-        r"do you protect my privacy", r"do you store my data", r"do you share my information",
-        r"do you remember me", r"do you know me", r"do you save our chats", r"do you keep what i write",
-        r"are you ai", r"are you a robot", r"are you a program", r"are you human", r"do you have consciousness",
-        r"do you feel", r"do you think", r"chatgpt", r"openai", r"midjourney", r"dall", r"google", r"bard", r"claude",
-        r"are you like", r"are you a version of", r"are you gpt", r"gpt"
-    ]
-    
-    for pattern in arabic_patterns + english_patterns:
-        if re.search(pattern, text_lower):
-            return True
-    return False
+    return instructions.get(prompt_type, instructions["text"])
 
-def get_custom_response(text, language="ar"):
-    """استرجاع الإجابة المخصصة بناءً على نوع السؤال"""
-    text_lower = text.lower().strip()
-    
-    if re.search(r"(من أنت|who are you|ما اسمك|your name|مين أنت|وش اسمك|شسمك)", text_lower):
-        return CUSTOM_RESPONSES[language]["identity"]
-    elif re.search(r"(ما هدفك|what is your purpose|لماذا تم إنشاؤك|why were you created|شغلك إيش|what do you do)", text_lower):
-        return CUSTOM_RESPONSES[language]["purpose"]
-    elif re.search(r"(من صنعك|who made you|من مطورك|who developed you|مين اللي صنعك|who owns you)", text_lower):
-        return CUSTOM_RESPONSES[language]["creator"]
-    elif re.search(r"(كيف تعمل|how do you work|كيف تفكر|how do you think|شلون تشتغل|how are you built)", text_lower):
-        return CUSTOM_RESPONSES[language]["how_work"]
-    elif re.search(r"(ما قدراتك|what can you do|ما مميزاتك|what are your capabilities|شيمكنك تسوي|what can i do)", text_lower):
-        return CUSTOM_RESPONSES[language]["capabilities"]
-    elif re.search(r"(ما حدودك|what are your limitations|ما عيوبك|what are your weaknesses|شينقصك|what can't you do)", text_lower):
-        return CUSTOM_RESPONSES[language]["limitations"]
-    elif re.search(r"(هل تحمي خصوصيتي|do you protect my privacy|هل تخزن بياناتي|do you store my data|هل تحفظ اللي أكتبه|do you keep what i write)", text_lower):
-        return CUSTOM_RESPONSES[language]["privacy"]
-    else:
-        return CUSTOM_RESPONSES[language]["identity"]
-
-def calculate_smart_expiry(prompt_text, request_count=1):
-    """حساب مدة التخزين الذكية بناءً على التعقيد والتكرار"""
-    prompt_length = len(prompt_text)
-    length_factor = min(prompt_length / 100, 3)
-    repeat_factor = min(request_count / 5, 4)
-    base_time = 86400  # 24 ساعة
-    smart_expiry = int(base_time * length_factor * repeat_factor)
-    return min(smart_expiry, 2592000)  # لا تتجاوز 30 يوماً
-
-def generate_cache_key(text, prompt_type, language):
-    """إنشاء مفتاح فريد للـ Cache"""
-    key_data = f"{text}|{prompt_type}|{language}"
-    return hashlib.md5(key_data.encode()).hexdigest()
-
-def get_from_cache(key):
-    """استرجاع من الـ Cache مع تتبع الإحصائيات"""
-    if cache is None:
-        return None
-    try:
-        CACHE_STATS[key] += 1
-        cached_data = cache.hgetall(f"prompt:{key}")
-        if cached_data and b'prompt' in cached_data:
-            prompt_text = cached_data[b'prompt'].decode('utf-8')
-            return {"prompt": prompt_text}
-    except Exception as e:
-        print(f"Cache get error: {e}")
-    return None
-
-def save_to_cache(key, value, prompt_text):
-    """حفظ في الـ Cache مع إدارة ذكية للذاكرة"""
-    if cache is None:
-        return
-    try:
-        request_count = CACHE_STATS.get(key, 1)
-        expiry = calculate_smart_expiry(prompt_text, request_count)
-        cache.hset(f"prompt:{key}", mapping={
-            'prompt': prompt_text,
-            'timestamp': str(time.time()),
-            'requests': str(request_count)
-        })
-        cache.expire(f"prompt:{key}", expiry)
-        current_size = cache.dbsize()
-        if current_size > MAX_CACHE_SIZE:
-            print(f"⚠️ Cache size ({current_size}) exceeds limit.")
-    except Exception as e:
-        print(f"Cache set error: {e}")
+def call_openai_with_retry(messages, max_retries=3):
+    """استدعاء OpenAI مع إعادة المحاولة في حالة الفشل"""
+    for attempt in range(max_retries):
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=500,
+                temperature=0.7,
+                top_p=0.9,
+                frequency_penalty=0.3,
+                presence_penalty=0.3
+            )
+            return response
+        except openai.error.RateLimitError:
+            if attempt < max_retries - 1:
+                wait_time = (2 ** attempt) * 1  # Exponential backoff: 1s, 2s, 4s
+                print(f"⚠️ Rate limit hit, waiting {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                raise
+        except openai.error.APIError as e:
+            if attempt < max_retries - 1:
+                wait_time = 2
+                print(f"⚠️ API error, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                raise
+        except Exception as e:
+            raise
 
 @app.route('/generate-prompt', methods=['POST'])
 def generate_prompt():
@@ -195,42 +204,30 @@ def generate_prompt():
             return jsonify(cached_result)
         # --------------------------------
 
-        # تعليمات حسب اللغة والنوع
-        if language == "ar":
-            instructions = {
-                "image": "حوّل هذه الفكرة إلى برومبت احترافي لأدوات توليد الصور بالذكاء الاصطناعي باللغة العربية. اجعله مفصلاً واحترافياً، ولا يتجاوز 200 كلمة.",
-                "code": "اكتب كوداً نظيفاً وفعالاً ومعلّقاً جيداً لهذه المهمة. حدّد لغة البرمجة إذا لم تُذكر.",
-                "video": "أنشئ برومبت فيديو سينمائي مدته 10 ثوانٍ لأدوات توليد الفيديو بالذكاء الاصطناعي. كن محدداً بشأن المشهد والمزاج والأسلوب.",
-                "text": "أعد كتابة هذا كبرومبت عالي الجودة لتوليد نصوص بالذكاء الاصطناعي."
-            }
-        else:
-            instructions = {
-                "image": "Convert this idea into a detailed, professional AI image generation prompt in English. Keep it under 200 words.",
-                "code": "Generate clean, efficient, and well-commented code for this task. Specify the programming language if not mentioned.",
-                "video": "Create a cinematic, 10-second AI video generation prompt. Be specific about scene, mood, and style.",
-                "text": "Rewrite this as a high-quality, engaging AI text generation prompt."
-            }
+        # استخدام التعليمات المحسّنة
+        system_message = get_enhanced_system_message(prompt_type, language)
+        system_message = system_message.replace("{user_text}", user_text)
 
-        system_message = instructions.get(prompt_type, instructions["text"])
-
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_text}
-            ],
-            max_tokens=200,
-            temperature=0.7
-        )
+        # استدعاء OpenAI مع إعادة المحاولة
+        response = call_openai_with_retry([
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": f"{'حوّل هذا إلى برومبت احترافي' if language == 'ar' else 'Transform this into a professional prompt'}: {user_text}"}
+        ])
 
         generated_prompt = response.choices[0].message['content'].strip()
         
         # --- فلتر أمان إضافي ---
-        forbidden_words = ["chatgpt", "openai", "midjourney", "dall", "google", "bard", "claude", "gpt"]
+        forbidden_words = ["chatgpt", "openai", "midjourney", "dall-e", "google", "bard", "claude", "gpt-3", "gpt-4"]
         if any(word in generated_prompt.lower() for word in forbidden_words):
-            fallback_prompt = "تم توليد برومبت احترافي بنجاح. يرجى استخدامه في أدوات الذكاء الاصطناعي المفضلة لديك."
-            generated_prompt = fallback_prompt if language == "en" else "تم توليد برومبت احترافي بنجاح. يرجى استخدامه في أدوات الذكاء الاصطناعي المفضلة لديك."
+            fallback_prompt = "Professional prompt generated successfully. Please use it in your preferred AI tools." if language == "en" else "تم توليد برومبت احترافي بنجاح. يرجى استخدامه في أدوات الذكاء الاصطناعي المفضلة لديك."
+            generated_prompt = fallback_prompt
         # ------------------------
+
+        # --- التحقق من جودة البرومبت ---
+        if len(generated_prompt) < 20:
+            fallback_prompt = "تم توليد برومبت احترافي. يرجى المحاولة مرة أخرى بمزيد من التفاصيل." if language == "ar" else "Professional prompt generated. Please try again with more details."
+            generated_prompt = fallback_prompt
+        # -------------------------------
 
         result = {"prompt": generated_prompt}
         
@@ -241,14 +238,39 @@ def generate_prompt():
         
         return jsonify(result)
 
+    except openai.error.RateLimitError:
+        error_msg = "عذراً، الخدمة مشغولة حالياً. حاول بعد قليل." if data.get("language", "ar") == "ar" else "Sorry, service is busy. Try again shortly."
+        return jsonify({"prompt": error_msg}), 429
+    except openai.error.AuthenticationError:
+        error_msg = "خطأ في المصادقة. تحقق من مفتاح API." if data.get("language", "ar") == "ar" else "Authentication error. Check API key."
+        return jsonify({"prompt": error_msg}), 401
     except Exception as e:
+        print(f"Error: {e}")
         error_msg = "عذراً، حدث خطأ. حاول لاحقاً." if data.get("language", "ar") == "ar" else "Sorry, an error occurred. Please try again."
         return jsonify({"prompt": error_msg}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    return "السيرفر يعمل! ✅"
+    """فحص صحة السيرفر"""
+    return jsonify({
+        "status": "healthy",
+        "service": AI_NAME,
+        "cache_active": cache is not None,
+        "timestamp": time.time()
+    })
+
+@app.route('/stats', methods=['GET'])
+def stats():
+    """إحصائيات الاستخدام"""
+    try:
+        cache_size = cache.dbsize() if cache else 0
+        return jsonify({
+            "cache_size": cache_size,
+            "most_requested": dict(sorted(CACHE_STATS.items(), key=lambda x: x[1], reverse=True)[:10])
+        })
+    except:
+        return jsonify({"error": "Stats unavailable"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False)
