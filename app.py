@@ -183,7 +183,7 @@ def cache_lookup(norm_text: str, ptype: str, lang: str, similarity_threshold: fl
 
 # ------------ Heuristic Intent Detection (no extra API call) ------------
 TYPE_ALIASES = {
-    "نص": "text", "صورة": "image", "فيديو": "video", "كود": "code",
+    "نص": "text", "صورة": "image", "فيديو": "video", " كود": "code", "كود": "code",
     "text": "text", "image": "image", "video": "video", "code": "code"
 }
 
@@ -414,7 +414,7 @@ def generate():
     """
     Request JSON:
       {
-        "prompt": "user idea text",
+        "prompt": "user idea text",  # أو text أو input
         "type": "نص/صورة/فيديو/كود OR Text/Image/Video/Code (optional)",
         "language": "ar|en (optional)"
       }
@@ -428,12 +428,15 @@ def generate():
       }
     """
     data = request.get_json(force=True, silent=True) or {}
-    user_input = (data.get("prompt") or "").strip()
+
+    # ✅ يدعم prompt/text/input كلها
+    user_input = (data.get("prompt") or data.get("text") or data.get("input") or "").strip()
+
     req_type = (data.get("type") or "").strip()
     language = (data.get("language") or "").strip().lower()
 
     if not user_input:
-        msg = "الرجاء إدخال نص صحيح" if (language.startswith("ar") or is_arabic_text(user_input)) else "Please enter valid text"
+        msg = "الرجاء إدخال نص صحيح" if (language.startswith("ar")) else "Please enter valid text"
         return jsonify({"error": msg}), 400
 
     # Detect language if not provided
@@ -503,4 +506,3 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=5000)  # debug=False تلقائيًا
-
