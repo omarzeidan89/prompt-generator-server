@@ -215,14 +215,14 @@ def heuristic_intent(user_input: str):
 # ------------ Token Scaling (language + type + complexity) ------------
 # وفق الجدول الذي طلبته:
 BASE_MAX_TOKENS = {
-    ("ar", "image"): 200,
-    ("en", "image"): 150,
-    ("ar", "text"):  150,
-    ("en", "text"):  100,
-    ("ar", "video"): 200,
-    ("en", "video"): 100,
-    ("ar", "code"):  150,
-    ("en", "code"):  120,
+    ("ar", "image"): 400,
+    ("en", "image"): 300,
+    ("ar", "text"):  300,
+    ("en", "text"):  200,
+    ("ar", "video"): 400,
+    ("en", "video"): 300,
+    ("ar", "code"):  300,
+    ("en", "code"):  250,
 }
 
 def estimate_complexity(user_text: str) -> float:
@@ -506,3 +506,4 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=5000)  # debug=False تلقائيًا
+
